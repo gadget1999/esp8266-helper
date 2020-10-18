@@ -13,8 +13,9 @@
 #include "WifiConnection.h"
 #include "Logger.h"
 
-const char*   CONFIG_FILENAME = "/config.json";
-const size_t  MAX_FILE_SIZE = 1024;
+const char*  CONFIG_FILENAME = "/config.json";
+const size_t MAX_FILE_SIZE = 1024;
+const size_t MAX_CONFIG_LEN = 32;   // max length of each config entry
 
 ConfigurationClass GlobalConfig;
 
@@ -27,7 +28,41 @@ ConfigurationClass::~ConfigurationClass() {
     delete _pConfig;
 }
 
-bool ConfigurationClass::LoadConfig() {
+bool ConfigurationClass::AddSchemaField(const char* id, const char* name, size_t len) {
+  if ((NULL == id) || (NULL == name) || (len > MAX_CONFIG_LEN - 1)) {
+    ERROR("Invalid schema field.");
+    return false;
+  }
+
+  if ((strcmp(id, FIELD_SSID) == 0) ||
+      (strcmp(id, FIELD_PASSWORD) == 0) ) {
+    ERROR("Cannot add [%s]: it is a built-in field.", id);
+    return false;
+  }
+
+  if (MAX_CONFIG_SIZE == _SchemaSize) {
+    ERROR("Max number of schema field reached.");
+    return false;
+  }
+
+  _Schema[_SchemaSize].Id = id;
+  _Schema[_SchemaSize].Name = name;
+  _Schema[_SchemaSize].Len = len;
+  _SchemaSize++;
+  return true;
+}
+
+bool ConfigurationClass::LoadFromFile()  {
+  if (_SchemaSize == 0) {
+    ERROR("Please call AddSchemaField() to configure schema first.");
+    return false;
+  }
+  
+  if (!LittleFS.begin())  {
+    ERROR("Failed to mount file system");
+    return false;
+  }
+
   File configFile = LittleFS.open(CONFIG_FILENAME, "r");
   if (!configFile) {
     ERROR("Failed to open config file.");
@@ -55,49 +90,43 @@ bool ConfigurationClass::LoadConfig() {
     return false;
   }
 
-  INFO("Config file loaded. (%u items)", _pConfig->count());
+  PrintConfig();
+  return IsConfigComplete();
+}
+
+bool ConfigurationClass::IsConfigComplete() {
+  for (size_t i = 0; i < _SchemaSize; i++) {
+    if (_pConfig->search(_Schema[i].Id).isEmpty())
+      return false;
+  }
   return true;
 }
 
-bool ConfigurationClass::AddSchemaField(const char* id, const char* name, int len) {
-  if (MAX_CONFIG_SIZE == _SchemaSize) {
-    ERROR("Max number of schema field reached.");
-    return false;
+void ConfigurationClass::PrintConfig()  {
+  // print what we have first
+  DEBUG("Current Config setting (%u items):", _pConfig->count());
+  for (size_t i = 0; i < _pConfig->count(); i++) {
+    DEBUG(" %s=%s", _pConfig->key(i).c_str(), _pConfig->value(i).c_str());
   }
-
-  if ((NULL == id) || (NULL == name)) {
-    ERROR("Invalid schema field.");
-    return false;
-  }
-
-  _Schema[_SchemaSize].Id = id;
-  _Schema[_SchemaSize].Name = name;
-  _Schema[_SchemaSize].Len = len;
-  _SchemaSize++;
-  return true;
-}
-
-bool ConfigurationClass::Setup()  {
-  if (!LittleFS.begin())  {
-    ERROR("Failed to mount file system");
-    return false;
-  }
-
-  if (!LoadConfig()) 
-    return false;
 
   // check and see if the config is complete
+  // check if built-in fields exist
+  const char* field = FIELD_SSID;
+  if (_pConfig->search(field).isEmpty())
+    ERROR(" >>> Missing built-in field: %s", field);
+  field = FIELD_PASSWORD;
+  if (_pConfig->search(field).isEmpty())
+    ERROR(" >>> Missing built-in field: %s", field);
+  // check if missing custom fields
   for (size_t i = 0; i < _SchemaSize; i++) {
-    if (_pConfig->search(_Schema[i].Id).isEmpty()) {
-      ERROR("Missing config item: %s", _Schema[i].Id);
-      return false;
+    field = _Schema[i].Id;
+    if (_pConfig->search(field).isEmpty()) {
+      ERROR(" >>> Missing custom field: %s", field);
     }
   }
-
-  return true;
 }
 
-bool ConfigurationClass::Save() {
+bool ConfigurationClass::SaveToFile() {
   if (_pConfig->jsize() == 0) {
     ERROR("Config setting is empty.");
     return false;
@@ -123,23 +152,19 @@ String ConfigurationClass::Get(const char* varname)  {
   return _pConfig->search(varname);
 }
 
-/*
+//////////////////////////////////////////////////////////////
+// WifiManager related variables
+//////////////////////////////////////////////////////////////
 
+const char* DEFAULT_SSID = "Esp8266Config";
+const char* DEFAULT_PASSWORD = "Arduino";
+const char* DEFAULT_IP = "10.0.1.56";
+const char* DEFAULT_GATEWAY = "10.0.1.1";
+const char* DEFAULT_SUBNET = "255.255.255.0";
 
-//needed for library
-
-#include <ArduinoJson.h>          //https://github.com/bblanchon/ArduinoJson
-
-
-//define your default values here, if there are different values in config.json, they are overwritten.
-//length should be max size + 1 
-char mqtt_server[40];
-char mqtt_port[6] = "8080";
-char blynk_token[33] = "YOUR_BLYNK_TOKEN";
-//default custom static IP
-char static_ip[16] = "10.0.1.56";
-char static_gw[16] = "10.0.1.1";
-char static_sn[16] = "255.255.255.0";
+void configModeCallback (WiFiManager *myWiFiManager) {
+  Serial.println("Entered config mode");
+}
 
 //flag for saving data
 bool shouldSaveConfig = false;
@@ -150,99 +175,34 @@ void saveConfigCallback () {
   shouldSaveConfig = true;
 }
 
-void setup() {
-  // put your setup code here, to run once:
-  Serial.begin(115200);
-  Serial.println();
-
-  //clean FS, for testing
-  //SPIFFS.format();
-
-  //read configuration from FS json
-  Serial.println("mounting FS...");
-
-  if (SPIFFS.begin()) {
-    Serial.println("mounted file system");
-    if (SPIFFS.exists("/config.json")) {
-      //file exists, reading and loading
-      Serial.println("reading config file");
-      File configFile = SPIFFS.open("/config.json", "r");
-      if (configFile) {
-        Serial.println("opened config file");
-        size_t size = configFile.size();
-        // Allocate a buffer to store contents of the file.
-        std::unique_ptr<char[]> buf(new char[size]);
-
-        configFile.readBytes(buf.get(), size);
-        DynamicJsonBuffer jsonBuffer;
-        JsonObject& json = jsonBuffer.parseObject(buf.get());
-        json.printTo(Serial);
-        if (json.success()) {
-          Serial.println("\nparsed json");
-
-          strcpy(mqtt_server, json["mqtt_server"]);
-          strcpy(mqtt_port, json["mqtt_port"]);
-          strcpy(blynk_token, json["blynk_token"]);
-
-          if(json["ip"]) {
-            Serial.println("setting custom ip from config");
-            //static_ip = json["ip"];
-            strcpy(static_ip, json["ip"]);
-            strcpy(static_gw, json["gateway"]);
-            strcpy(static_sn, json["subnet"]);
-            //strcat(static_ip, json["ip"]);
-            //static_gw = json["gateway"];
-            //static_sn = json["subnet"];
-            Serial.println(static_ip);
-            Serial.println("converting ip");
-            IPAddress ip = ipFromCharArray(static_ip);
-            Serial.println(ip);
-          } else {
-            Serial.println("no custom ip in config");
-          }
-        } else {
-          Serial.println("failed to load json config");
-        }
-      }
-    }
-  } else {
-    Serial.println("failed to mount FS");
-  }
-  //end read
-  Serial.println(static_ip);
-  Serial.println(blynk_token);
-  Serial.println(mqtt_server);
-
-
-  // The extra parameters to be configured (can be either global or just in the setup)
-  // After connecting, parameter.getValue() will get you the configured value
-  // id/name placeholder/prompt default length
-  WiFiManagerParameter custom_mqtt_server("server", "mqtt server", mqtt_server, 40);
-  WiFiManagerParameter custom_mqtt_port("port", "mqtt port", mqtt_port, 5);
-  WiFiManagerParameter custom_blynk_token("blynk", "blynk token", blynk_token, 34);
-
+bool ConfigurationClass::ReConfig() {
   //WiFiManager
   //Local intialization. Once its business is done, there is no need to keep it around
   WiFiManager wifiManager;
 
   //set config save notify callback
+  wifiManager.setAPCallback(configModeCallback);
   wifiManager.setSaveConfigCallback(saveConfigCallback);
 
   //set static ip
   IPAddress _ip,_gw,_sn;
-  _ip.fromString(static_ip);
-  _gw.fromString(static_gw);
-  _sn.fromString(static_sn);
+  _ip.fromString(DEFAULT_IP);
+  _gw.fromString(DEFAULT_GATEWAY);
+  _sn.fromString(DEFAULT_SUBNET);
 
   wifiManager.setSTAStaticIPConfig(_ip, _gw, _sn);
-  
-  //add all your parameters here
-  wifiManager.addParameter(&custom_mqtt_server);
-  wifiManager.addParameter(&custom_mqtt_port);
-  wifiManager.addParameter(&custom_blynk_token);
 
-  //reset settings - for testing
-  //wifiManager.resetSettings();
+  WiFiManagerParameter* fields[MAX_CONFIG_SIZE];
+  for (size_t i = 0; i < _SchemaSize; i++) {
+    const char* id = _Schema[i].Id;
+    const char* name = _Schema[i].Name;
+    const char* defVal = Get(_Schema[i].Id).c_str();
+    size_t len = _Schema[i].Len;
+    // add custom properties
+    INFO("Adding parameter(%s, %s, %s, %u)", id, name, defVal, len);
+    fields[i] = new WiFiManagerParameter(id, name, defVal, len);
+    wifiManager.addParameter(fields[i]);
+  }
 
   //set minimu quality of signal so it ignores AP's under that quality
   //defaults to 8%
@@ -257,7 +217,8 @@ void setup() {
   //if it does not connect it starts an access point with the specified name
   //here  "AutoConnectAP"
   //and goes into a blocking loop awaiting configuration
-  if (!wifiManager.autoConnect("AutoConnectAP", "password")) {
+  Serial.println("Start config portal.");
+  if (!wifiManager.startConfigPortal(DEFAULT_SSID, DEFAULT_PASSWORD)) {
     Serial.println("failed to connect and hit timeout");
     delay(3000);
     //reset and try again, or maybe put it to deep sleep
@@ -269,9 +230,21 @@ void setup() {
   Serial.println("connected...yeey :)");
 
   //read updated parameters
-  strcpy(mqtt_server, custom_mqtt_server.getValue());
-  strcpy(mqtt_port, custom_mqtt_port.getValue());
-  strcpy(blynk_token, custom_blynk_token.getValue());
+  _pConfig->destroy();
+  // process SSID and Password separately as they are built-in WifiManager fields
+  _pConfig->insert(FIELD_SSID, wifiManager.getConfigPortalSSID().c_str());
+  // process custom fields
+  for (size_t i = 0; i < _SchemaSize; i++) {
+    INFO("Got field: %s=%s", fields[i]->getID(), fields[i]->getValue());
+    _pConfig->insert(fields[i]->getID(), fields[i]->getValue());
+    delete fields[i];
+  }
+  PrintConfig();
+
+  return true;  
+}
+
+/*
 
   //save the custom parameters to FS
   if (shouldSaveConfig) {
@@ -300,12 +273,17 @@ void setup() {
   Serial.println("local ip");
   Serial.println(WiFi.localIP());
   Serial.println(WiFi.gatewayIP());
-  Serial.println(WiFi.subnetMask());
-}
-
-void loop() {
-  // put your main code here, to run repeatedly:
 
 
-}
+//needed for library
+
+#include <ArduinoJson.h>          //https://github.com/bblanchon/ArduinoJson
+
+
+//define your default values here, if there are different values in config.json, they are overwritten.
+//length should be max size + 1 
+char mqtt_server[40];
+char mqtt_port[6] = "8080";
+char blynk_token[33] = "YOUR_BLYNK_TOKEN";
+
 */

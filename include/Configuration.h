@@ -3,17 +3,19 @@
 #ifndef _CONFIGURATION_h
 #define _CONFIGURATION_h
 
-#define MAX_CONFIG_SIZE		32
+#define MAX_CONFIG_SIZE		8	// number of config entries
+
+#define FIELD_SSID			"SSID"
+#define FIELD_PASSWORD	"Password"
 
 struct Property
 {
 	const char* Id = NULL;
 	const char* Name = NULL;
-	int Len = 0;
+	size_t Len = 0;
 };
 
 class Dictionary;
-
 class ConfigurationClass
 {
 	protected:
@@ -21,18 +23,17 @@ class ConfigurationClass
 		size_t _SchemaSize = 0;
 		Dictionary* _pConfig = NULL;
 
-		bool LoadConfig();
-	
 	public:
 		ConfigurationClass();
 		~ConfigurationClass();
 
-		bool AddSchemaField(const char* id, const char* name, int len);
-		bool Setup();
-		bool Loop();
-
+		bool AddSchemaField(const char* id, const char* name, size_t len);
+		bool LoadFromFile();
+		bool IsConfigComplete();
 		bool ReConfig();
-		bool Save();
+		bool SaveToFile();
+
+		void PrintConfig();
 
 		String Get(const char* varname);
 };

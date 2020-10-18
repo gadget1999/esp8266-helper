@@ -22,18 +22,22 @@ delay(6000);
 
   GlobalConfig.AddSchemaField("SSID", "SSID", DEFAULT_OPTION_LEN);
   GlobalConfig.AddSchemaField("Password", "Wifi Password", DEFAULT_OPTION_LEN);
+  GlobalConfig.AddSchemaField("Device_Name", "Device Name", DEFAULT_OPTION_LEN);
   GlobalConfig.AddSchemaField("MQTT_Server", "MQTT Server Address", DEFAULT_OPTION_LEN);
   GlobalConfig.AddSchemaField("MQTT_User", "MQTT User", DEFAULT_OPTION_LEN);
   GlobalConfig.AddSchemaField("MQTT_Password", "MQTT Password", DEFAULT_OPTION_LEN);
-  GlobalConfig.Setup();
+  GlobalConfig.LoadFromFile();
 
   String test;
   test = GlobalConfig.Get("SSID");
   INFO("Config[SSID]=%s", test.c_str());
 
-  test = GlobalConfig.Get("ESE");
-  INFO("Config[ESE]=%s", test.c_str());
+  test = GlobalConfig.Get("WIN10VHD");
+  INFO("Config[WIN10VHD]=%s", test.c_str());
 
+  if (!GlobalConfig.IsConfigComplete()) {
+    GlobalConfig.ReConfig();
+  }
 }
 
 void loop() {}
