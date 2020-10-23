@@ -34,6 +34,7 @@ bool ConfigurationClass::AddSchemaField(const char* id, const char* name, size_t
     return false;
   }
 
+  // replace this when new version has way to get password
   if ((strcmp(id, FIELD_SSID) == 0) ||
       (strcmp(id, FIELD_PASSWORD) == 0) ) {
     ERROR("Cannot add [%s]: it is a built-in field.", id);
@@ -117,6 +118,7 @@ void ConfigurationClass::PrintConfig()  {
   field = FIELD_PASSWORD;
   if (_pConfig->search(field).isEmpty())
     ERROR(" >>> Missing built-in field: %s", field);
+
   // check if missing custom fields
   for (size_t i = 0; i < _SchemaSize; i++) {
     field = _Schema[i].Id;
@@ -176,20 +178,18 @@ void saveConfigCallback () {
 }
 
 bool ConfigurationClass::ReConfig() {
-  //WiFiManager
-  //Local intialization. Once its business is done, there is no need to keep it around
+  // Local intialization. Once its business is done, there is no need to keep it around
   WiFiManager wifiManager;
 
-  //set config save notify callback
+  // Set config save notify callback
   wifiManager.setAPCallback(configModeCallback);
   wifiManager.setSaveConfigCallback(saveConfigCallback);
 
-  //set static ip
-  IPAddress _ip,_gw,_sn;
+  // Set static ip
+  IPAddress _ip, _gw, _sn;
   _ip.fromString(DEFAULT_IP);
   _gw.fromString(DEFAULT_GATEWAY);
   _sn.fromString(DEFAULT_SUBNET);
-
   wifiManager.setSTAStaticIPConfig(_ip, _gw, _sn);
 
   WiFiManagerParameter* fields[MAX_CONFIG_SIZE];
@@ -232,7 +232,8 @@ bool ConfigurationClass::ReConfig() {
   //read updated parameters
   _pConfig->destroy();
   // process SSID and Password separately as they are built-in WifiManager fields
-  _pConfig->insert(FIELD_SSID, wifiManager.getConfigPortalSSID().c_str());
+  _pConfig->insert(FIELD_SSID, WiFi.SSID().c_str());
+  _pConfig->insert(FIELD_PASSWORD, WiFi.psk().c_str());
   // process custom fields
   for (size_t i = 0; i < _SchemaSize; i++) {
     INFO("Got field: %s=%s", fields[i]->getID(), fields[i]->getValue());
@@ -243,47 +244,3 @@ bool ConfigurationClass::ReConfig() {
 
   return true;  
 }
-
-/*
-
-  //save the custom parameters to FS
-  if (shouldSaveConfig) {
-    Serial.println("saving config");
-    DynamicJsonBuffer jsonBuffer;
-    JsonObject& json = jsonBuffer.createObject();
-    json["mqtt_server"] = mqtt_server;
-    json["mqtt_port"] = mqtt_port;
-    json["blynk_token"] = blynk_token;
-
-    json["ip"] = WiFi.localIP().toString();
-    json["gateway"] = WiFi.gatewayIP().toString();
-    json["subnet"] = WiFi.subnetMask().toString();
-
-    File configFile = SPIFFS.open("/config.json", "w");
-    if (!configFile) {
-      Serial.println("failed to open config file for writing");
-    }
-
-    json.prettyPrintTo(Serial);
-    json.printTo(configFile);
-    configFile.close();
-    //end save
-  }
-
-  Serial.println("local ip");
-  Serial.println(WiFi.localIP());
-  Serial.println(WiFi.gatewayIP());
-
-
-//needed for library
-
-#include <ArduinoJson.h>          //https://github.com/bblanchon/ArduinoJson
-
-
-//define your default values here, if there are different values in config.json, they are overwritten.
-//length should be max size + 1 
-char mqtt_server[40];
-char mqtt_port[6] = "8080";
-char blynk_token[33] = "YOUR_BLYNK_TOKEN";
-
-*/
