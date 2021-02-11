@@ -12,6 +12,9 @@
 
 #define DEFAULT_OPTION_LEN  20
 
+const int PIN_RF_RECEIVE = 4;    // D2
+RFSensor rf_sensor;
+
 void setup() {
   Serial.begin(115200);
   Serial.println("Setup ...");
@@ -38,6 +41,10 @@ delay(6000);
   if (!GlobalConfig.IsConfigComplete()) {
     GlobalConfig.ReConfig();
   }
+
+  rf_sensor.Setup(-1, PIN_RF_RECEIVE);
 }
 
-void loop() {}
+void loop() {
+  rf_sensor.Loop();
+}
